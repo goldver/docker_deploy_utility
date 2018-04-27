@@ -1,0 +1,58 @@
+#!/usr/bin/env groovy
+
+def user
+
+node('general') {
+
+    wrap([$class: 'BuildUser']) {
+        user = env.BUILD_USER_ID
+    }
+
+    currentBuild.displayName = "${ENV_PROFILE.replace('xyz-', 'dc-')}-${SCRIPT}-${VERSION.replace('1.0-SNAPSHOT-', '')}"
+
+
+    def tool_version = "0.1.0-126"
+    def repo_url = 'git@github.xyz.com:'
+
+    def slack
+
+    try {
+        stage('print input variables') {
+            echo "==> VERSION: ${VERSION}\n" +  \
+                   "==> ENVIRONMENT: ${ENV_PROFILE}\n" +  \
+                   "==> ACTION: ${SCRIPT}\n" +  \
+                   "==> USER NAME: ${user}\n" +  \
+                   "==> DOCKER UTILS IMAGE: ${tool_version}\n" +  \
+                   "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+        }
+
+        stage('prepare sources') {
+            cleanWs()
+
+            dir('devops-repo') {
+                def devops_repo = repo_url + '/devops.git'
+                git changelog: false, credentialsId: 'GHE-ssh', poll: false, url: devops_repo, branch: 'master'
+
+                slack = load "deployment/jenkins_common/slack.groovy"
+            }
+        }
+
+        stage('run docker') {
+            if (ENV_PROFILE == "Environment List" || SCRIPT == "Choose Action" || VERSION == "") {
+                echo "### Please check Version, Environment Name or/and Script fields! ###"
+                currentBuild.result = 'FAILURE'
+            } else {
+                sh "docker run --rm -t -eENV_PROFILE=${ENV_PROFILE} -eSCRIPT=${SCRIPT} -eVERSION=${VERSION} virtual-docker.martifactory.io/md-devops-tools:${tool_version}"
+            }
+        }
+
+    } catch (exeption) {
+        currentBuild.result = "FAILED"
+        throw exeption
+    } finally {
+        currentBuild.result = currentBuild.result ?: "SUCCESS"
+
+        def message = slack.sendSlack(currentBuild.result, VERSION, ENV_PROFILE, SCRIPT, user, "<" + env.BUILD_URL + "console|link>")
+        slackSend channel: "md-deployment", attachments: message.toString()
+    }
+}

@@ -1,0 +1,47 @@
+#!/usr/bin/env groovy
+node('general') {
+
+    def repo_url = 'git@github.xyz.com:'
+    def projectName = "md-devops-tools"
+    def buildNumber = env.BUILD_NUMBER
+    def version = '0.1.0'
+    def tag = null
+
+    stage('print input variables') {
+        echo "==> DEVOPS DEPLOY UTILITY\n" +  \
+               "==> BRANCH: ${BRANCH}\n" +  \
+               "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    }
+    stage('get repository') {
+        cleanWs()
+
+        dir('devops-repo') {
+            def devops_repo = repo_url + '/devops.git'
+            git changelog: false, credentialsId: 'GHE-ssh', poll: false, url: devops_repo, branch: BRANCH
+        }
+    }
+
+    stage('generate tag') {
+        dir('devops-repo') {
+
+            def commitId = sh returnStdout: true, script: 'git rev-parse --short=7 HEAD | tr -d "\n"'
+            tag = "virtual-docker.martifactory.io/${projectName}:${version}-${buildNumber}-${commitId}"
+
+            currentBuild.displayName = "${version}-${buildNumber}-${commitId}"
+        }
+    }
+
+    stage('build docker image') {
+        dir('devops-repo/deployment/deploy_gc_utils/') {
+
+            sh "docker build --rm=true -t ${tag} --file Dockerfile ."
+        }
+    }
+
+    stage('publish docker image') {
+
+        sh "docker push ${tag}"
+        echo "===> Tag: ${tag} ===>"
+
+    }
+}
